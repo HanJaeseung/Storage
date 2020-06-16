@@ -1,0 +1,3121 @@
+diff -w -ruN lz4-1.7.5.orig/examples/Makefile lz4-1.7.5/examples/Makefile
+--- lz4-1.7.5.orig/examples/Makefile	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/examples/Makefile	2018-02-05 15:00:05.288536000 +0300
+@@ -29,13 +29,51 @@
+ 
+ CFLAGS ?= -O3
+ CFLAGS += -std=gnu99 -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wstrict-prototypes
++
++ifeq ($(WITH_IPP), yes)
++CFLAGS += -DWITH_IPP -I$(IPPROOT)/include
++ifeq ($(ARCH), ia32)
++CFLAGS += -m32
++endif
++#
++# System configuration detection
++#
++SYSTEM_SFX := $(shell uname)
++ifeq ($(SYSTEM_SFX),Darwin)
++	G_SYSTEM := macOS
++else
++	G_SYSTEM := Linux
++endif
++
++ifeq ($(G_SYSTEM), macOS)
++        IPPLIBS64 := $(IPPROOT)/lib/libippdc.a $(IPPROOT)/lib/libipps.a $(IPPROOT)/lib/libippcore.a
++else
++        IPPLIBS64 := $(IPPROOT)/lib/intel64/libippdc.a $(IPPROOT)/lib/intel64/libipps.a $(IPPROOT)/lib/intel64/libippcore.a
++endif
++
++# For linking to dynamic libraries
++#IPPLIBS64 = -L$(IPPROOT)/lib/intel64 -lippdc -lipps -lippcore
++
++ifneq ($(G_SYSTEM), macOS)
++        IPPLIBS32 = $(IPPROOT)/lib/ia32/libippdc.a $(IPPROOT)/lib/ia32/libipps.a $(IPPROOT)/lib/ia32/libippcore.a
++else
++        IPPLIBS32 = $(IPPLIBS64)
++endif
++# For linking to dynamic libraries
++# IPPLIBS32 = -L$(IPPROOT)/lib/ia32 -lippdc -lipps -lippcore
++
++ifeq ($(ARCH), intel64)
++	IPPLIBS = $(IPPLIBS64)
++else
++	IPPLIBS = $(IPPLIBS32)
++endif
++endif
++
+ FLAGS  := -I../lib $(CPPFLAGS) $(CFLAGS) $(LDFLAGS)
+ 
+ TESTFILE= Makefile
+ LZ4DIR := ../lib
+ LZ4 = ../programs/lz4
+-
+-
+ # Define *.exe as extension for Windows systems
+ ifneq (,$(filter Windows%,$(OS)))
+ EXT =.exe
+@@ -51,31 +89,67 @@
+ all: printVersion doubleBuffer dictionaryRandomAccess ringBuffer ringBufferHC lineCompress frameCompress
+ 
+ printVersion: $(LZ4DIR)/lz4.c printVersion.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ doubleBuffer: $(LZ4DIR)/lz4.c blockStreaming_doubleBuffer.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ dictionaryRandomAccess: $(LZ4DIR)/lz4.c dictionaryRandomAccess.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ ringBuffer  : $(LZ4DIR)/lz4.c blockStreaming_ringBuffer.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ ringBufferHC: $(LZ4DIR)/lz4.c $(LZ4DIR)/lz4hc.c HCStreaming_ringBuffer.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ lineCompress: $(LZ4DIR)/lz4.c blockStreaming_lineByLine.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ frameCompress: frameCompress.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(LZ4DIR)/liblz4.a $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(LZ4DIR)/liblz4.a
++endif
+ 
+ compressFunctions: $(LZ4DIR)/lz4.c compress_functions.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) -lrt $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT) -lrt
++endif
+ 
+ simpleBuffer: $(LZ4DIR)/lz4.c simple_buffer.c
++ifeq ($(WITH_IPP), yes)
++	$(CC)      $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC)      $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ test : all
+ 	./printVersion$(EXT)
+diff -w -ruN lz4-1.7.5.orig/lib/lz4.c lz4-1.7.5/lib/lz4.c
+--- lz4-1.7.5.orig/lib/lz4.c	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/lib/lz4.c	2018-02-05 11:38:37.609263000 +0300
+@@ -31,7 +31,11 @@
+     - LZ4 homepage : http://www.lz4.org
+     - LZ4 source repository : https://github.com/lz4/lz4
+ */
+-
++#if defined(WITH_IPP)
++/* This source code file is modified with Intel(R) Integrated Performance Primitives content */
++#include <ipps.h>
++#include <ippdc.h>
++#endif
+ 
+ /*-************************************
+ *  Tuning parameters
+@@ -663,15 +667,50 @@
+     if (acceleration < 1) acceleration = ACCELERATION_DEFAULT;
+ 
+     if (maxOutputSize >= LZ4_compressBound(inputSize)) {
++#if defined(WITH_IPP)
++        if(acceleration < 2)
++        {
++            int outlen = maxOutputSize;
++            if(ippsEncodeLZ4_8u((const Ipp8u*)source, inputSize, (Ipp8u*)dest, &outlen, (Ipp8u*)ctx->hashTable) != ippStsNoErr)
++                return 0;
++            return outlen;
++        }
++        else
++        {
++        if (inputSize < LZ4_64Klimit)
++            return LZ4_compress_generic(ctx, source, dest, inputSize,             0,    notLimited,                        byU16, noDict, noDictIssue, acceleration);
++        else
++            return LZ4_compress_generic(ctx, source, dest, inputSize,             0,    notLimited, (sizeof(void*)==8) ? byU32 : byPtr, noDict, noDictIssue, acceleration);
++        }
++#else
+         if (inputSize < LZ4_64Klimit)
+             return LZ4_compress_generic(ctx, source, dest, inputSize,             0,    notLimited,                        byU16, noDict, noDictIssue, acceleration);
+         else
+             return LZ4_compress_generic(ctx, source, dest, inputSize,             0,    notLimited, (sizeof(void*)==8) ? byU32 : byPtr, noDict, noDictIssue, acceleration);
++#endif
+     } else {
++#if defined(WITH_IPP)
++        if(acceleration < 2)
++        {
++            int outlen = maxOutputSize;
++            int inlen = inputSize;
++            if(ippsEncodeLZ4Safe_8u((const Ipp8u*)source, &inlen, (Ipp8u*)dest, &outlen, (Ipp8u*)ctx->hashTable) != ippStsNoErr)
++                return 0;
++            return outlen;
++        }
++        else
++        {
++        if (inputSize < LZ4_64Klimit)
++            return LZ4_compress_generic(ctx, source, dest, inputSize, maxOutputSize, limitedOutput,                        byU16, noDict, noDictIssue, acceleration);
++        else
++            return LZ4_compress_generic(ctx, source, dest, inputSize, maxOutputSize, limitedOutput, (sizeof(void*)==8) ? byU32 : byPtr, noDict, noDictIssue, acceleration);
++    }
++#else
+         if (inputSize < LZ4_64Klimit)
+             return LZ4_compress_generic(ctx, source, dest, inputSize, maxOutputSize, limitedOutput,                        byU16, noDict, noDictIssue, acceleration);
+         else
+             return LZ4_compress_generic(ctx, source, dest, inputSize, maxOutputSize, limitedOutput, (sizeof(void*)==8) ? byU32 : byPtr, noDict, noDictIssue, acceleration);
++#endif
+     }
+ }
+ 
+@@ -714,6 +753,7 @@
+ }
+ 
+ 
++#if !defined(WITH_IPP)
+ /*-******************************
+ *  *_destSize() variant
+ ********************************/
+@@ -872,7 +912,7 @@
+     *srcSizePtr = (int) (((const char*)ip)-src);
+     return (int) (((char*)op)-dst);
+ }
+-
++#endif
+ 
+ static int LZ4_compress_destSize_extState (LZ4_stream_t* state, const char* src, char* dst, int* srcSizePtr, int targetDstSize)
+ {
+@@ -881,10 +921,17 @@
+     if (targetDstSize >= LZ4_compressBound(*srcSizePtr)) {  /* compression success is guaranteed */
+         return LZ4_compress_fast_extState(state, src, dst, *srcSizePtr, targetDstSize, 1);
+     } else {
++#if defined(WITH_IPP)
++        int outlen = targetDstSize;
++        if(ippsEncodeLZ4Safe_8u((const Ipp8u*)src, srcSizePtr, (Ipp8u*)dst, &outlen, (Ipp8u*)state->internal_donotuse.hashTable) < 0)
++            return 0;
++        return outlen;
++#else
+         if (*srcSizePtr < LZ4_64Klimit)
+             return LZ4_compress_destSize_generic(&state->internal_donotuse, src, dst, srcSizePtr, targetDstSize, byU16);
+         else
+             return LZ4_compress_destSize_generic(&state->internal_donotuse, src, dst, srcSizePtr, targetDstSize, sizeof(void*)==8 ? byU32 : byPtr);
++#endif
+     }
+ }
+ 
+@@ -938,7 +985,9 @@
+     LZ4_stream_t_internal* dict = &LZ4_dict->internal_donotuse;
+     const BYTE* p = (const BYTE*)dictionary;
+     const BYTE* const dictEnd = p + dictSize;
++#if !defined(WITH_IPP)
+     const BYTE* base;
++#endif
+ 
+     if ((dict->initCheck) || (dict->currentOffset > 1 GB))  /* Uninitialized structure, or reuse overflow */
+         LZ4_resetStream(LZ4_dict);
+@@ -951,15 +1000,19 @@
+ 
+     if ((dictEnd - p) > 64 KB) p = dictEnd - 64 KB;
+     dict->currentOffset += 64 KB;
++#if !defined(WITH_IPP)
+     base = p - dict->currentOffset;
++#endif
+     dict->dictionary = p;
+     dict->dictSize = (U32)(dictEnd - p);
+     dict->currentOffset += dict->dictSize;
+ 
++#if !defined(WITH_IPP)
+     while (p <= dictEnd-HASH_UNIT) {
+         LZ4_putPosition(p, dict->hashTable, byU32, base);
+         p+=3;
+     }
++#endif
+ 
+     return dict->dictSize;
+ }
+@@ -1009,9 +1062,65 @@
+     if (dictEnd == (const BYTE*)source) {
+         int result;
+         if ((streamPtr->dictSize < 64 KB) && (streamPtr->dictSize < streamPtr->currentOffset))
++#if !defined(WITH_IPP)
++            result = LZ4_compress_generic(streamPtr, source, dest, inputSize, maxOutputSize, limitedOutput, byU32, withPrefix64k, dictSmall, acceleration);
++#else
++        {
++            if (acceleration > 1)
+             result = LZ4_compress_generic(streamPtr, source, dest, inputSize, maxOutputSize, limitedOutput, byU32, withPrefix64k, dictSmall, acceleration);
+         else
++            {
++                IppStatus ippStat;
++                int srcLen, dstLen;
++                srcLen = inputSize;
++                dstLen = maxOutputSize;
++                if (streamPtr->currentOffset > streamPtr->dictSize)
++                {
++                    ippsSubC_32s_ISfs(streamPtr->currentOffset - streamPtr->dictSize, (Ipp32s*)streamPtr->hashTable, 0x1000, 0);
++                    ippsThreshold_LT_32s_I((Ipp32s*)streamPtr->hashTable, 0x1000, 0);
++                    ippStat = ippsEncodeLZ4DictSafe_8u((const Ipp8u*)source, streamPtr->dictSize, &srcLen, (Ipp8u*)dest, &dstLen, (Ipp8u*)streamPtr->hashTable,
++                        (const Ipp8u*)streamPtr->dictionary, streamPtr->dictSize);
++                }
++                else
++                    ippStat = ippsEncodeLZ4DictSafe_8u((const Ipp8u*)source, streamPtr->currentOffset, &srcLen, (Ipp8u*)dest, &dstLen, (Ipp8u*)streamPtr->hashTable, streamPtr->dictionary, streamPtr->dictSize);
++                if (ippStat != ippStsNoErr) {
++                    result = 0;
++                }
++                else
++                    result = dstLen;
++            }
++        }
++#endif
++        else
++#if !defined(WITH_IPP)
+             result = LZ4_compress_generic(streamPtr, source, dest, inputSize, maxOutputSize, limitedOutput, byU32, withPrefix64k, noDictIssue, acceleration);
++#else
++        {
++            if(acceleration > 1)
++                result = LZ4_compress_generic(streamPtr, source, dest, inputSize, maxOutputSize, limitedOutput, byU32, withPrefix64k, noDictIssue, acceleration);
++            else
++            {
++                IppStatus ippStat;
++                int srcLen, dstLen;
++                srcLen = inputSize;
++                dstLen = maxOutputSize;
++                if (streamPtr->currentOffset > streamPtr->dictSize)
++                {
++                    ippsSubC_32s_ISfs(streamPtr->currentOffset - streamPtr->dictSize, (Ipp32s*)streamPtr->hashTable, 0x1000, 0);
++                    ippsThreshold_LT_32s_I((Ipp32s*)streamPtr->hashTable, 0x1000, 0);
++                    ippStat = ippsEncodeLZ4DictSafe_8u((const Ipp8u*)source, streamPtr->dictSize, &srcLen, (Ipp8u*)dest, &dstLen, (Ipp8u*)streamPtr->hashTable,
++                        (const Ipp8u*)streamPtr->dictionary, streamPtr->dictSize);
++                }
++                else
++                ippStat = ippsEncodeLZ4DictSafe_8u((const Ipp8u*)source, streamPtr->currentOffset, &srcLen, (Ipp8u*)dest, &dstLen, (Ipp8u*)streamPtr->hashTable,
++                    (const Ipp8u*)streamPtr->dictionary, streamPtr->dictSize);
++                if (ippStat != ippStsNoErr)
++                    result = 0;
++                else
++                    result = dstLen;
++            }
++        }
++#endif
+         streamPtr->dictSize += (U32)inputSize;
+         streamPtr->currentOffset += (U32)inputSize;
+         return result;
+@@ -1019,13 +1128,49 @@
+ 
+     /* external dictionary mode */
+     {   int result;
++#if !defined(WITH_IPP)
+         if ((streamPtr->dictSize < 64 KB) && (streamPtr->dictSize < streamPtr->currentOffset))
+             result = LZ4_compress_generic(streamPtr, source, dest, inputSize, maxOutputSize, limitedOutput, byU32, usingExtDict, dictSmall, acceleration);
+         else
+             result = LZ4_compress_generic(streamPtr, source, dest, inputSize, maxOutputSize, limitedOutput, byU32, usingExtDict, noDictIssue, acceleration);
++#else
++    if (acceleration > 1)
++    {
++        if ((streamPtr->dictSize < 64 KB) && (streamPtr->dictSize < streamPtr->currentOffset))
++            result = LZ4_compress_generic(streamPtr, source, dest, inputSize, maxOutputSize, limitedOutput, byU32, usingExtDict, dictSmall, acceleration);
++        else
++            result = LZ4_compress_generic(streamPtr, source, dest, inputSize, maxOutputSize, limitedOutput, byU32, usingExtDict, noDictIssue, acceleration);
++    }
++    else
++    {
++        IppStatus ippStat;
++        int srcLen, dstLen;
++
++        srcLen = inputSize;
++        dstLen = maxOutputSize;
++        if (streamPtr->currentOffset > streamPtr->dictSize)
++        {
++            ippsSubC_32s_ISfs(streamPtr->currentOffset - streamPtr->dictSize, (Ipp32s*)streamPtr->hashTable, 0x1000, 0);
++            ippsThreshold_LT_32s_I((Ipp32s*)streamPtr->hashTable, 0x1000, 0);
++            ippStat = ippsEncodeLZ4DictSafe_8u((const Ipp8u*)source, streamPtr->dictSize, &srcLen, (Ipp8u*)dest, &dstLen, (Ipp8u*)streamPtr->hashTable,
++                (const Ipp8u*)streamPtr->dictionary, streamPtr->dictSize);
++        }
++        else
++        ippStat = ippsEncodeLZ4DictSafe_8u((const Ipp8u*)source, streamPtr->currentOffset, &srcLen, (Ipp8u*)dest, &dstLen, (Ipp8u*)streamPtr->hashTable,
++            (const Ipp8u*)streamPtr->dictionary, streamPtr->dictSize);
++        if (ippStat != ippStsNoErr)
++            result = 0;
++        else
++            result = dstLen;
++    }
++#endif
+         streamPtr->dictionary = (const BYTE*)source;
+         streamPtr->dictSize = (U32)inputSize;
++#if defined(WITH_IPP)
++        streamPtr->currentOffset = (U32)inputSize;
++#else
+         streamPtr->currentOffset += (U32)inputSize;
++#endif
+         return result;
+     }
+ }
+@@ -1042,7 +1187,14 @@
+     if (smallest > (const BYTE*) source) smallest = (const BYTE*) source;
+     LZ4_renormDictT(streamPtr, smallest);
+ 
++#if defined(WITH_IPP)
++    result = LZ4_compressBound(inputSize);
++    if(ippsEncodeLZ4Dict_8u((const Ipp8u*)source, streamPtr->currentOffset, inputSize, (Ipp8u*)dest, &result, (Ipp8u*)streamPtr->hashTable, 
++            (const Ipp8u*)streamPtr->dictionary, streamPtr->dictSize) < 0)
++        return 0;
++#else
+     result = LZ4_compress_generic(streamPtr, source, dest, inputSize, 0, notLimited, byU32, usingExtDict, noDictIssue, 1);
++#endif
+ 
+     streamPtr->dictionary = (const BYTE*)source;
+     streamPtr->dictSize = (U32)inputSize;
+@@ -1250,7 +1402,19 @@
+ 
+ int LZ4_decompress_safe(const char* source, char* dest, int compressedSize, int maxDecompressedSize)
+ {
++#if defined(WITH_IPP)
++    int inlen, outlen;
++    inlen = compressedSize;
++    outlen = maxDecompressedSize;
++
++    if (maxDecompressedSize == 0)
++        return ((compressedSize== 1) && (*source == 0)) ? 0 : -1;  /* Empty output buffer */
++    if (ippsDecodeLZ4_8u((const Ipp8u*)source, inlen, (Ipp8u*)dest, &outlen) != ippStsNoErr)
++        return outlen;
++    return outlen;
++#else
+     return LZ4_decompress_generic(source, dest, compressedSize, maxDecompressedSize, endOnInputSize, full, 0, noDict, (BYTE*)dest, NULL, 0);
++#endif
+ }
+ 
+ int LZ4_decompress_safe_partial(const char* source, char* dest, int compressedSize, int targetOutputSize, int maxDecompressedSize)
+diff -w -ruN lz4-1.7.5.orig/lib/lz4frame.c lz4-1.7.5/lib/lz4frame.c
+--- lz4-1.7.5.orig/lib/lz4frame.c	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/lib/lz4frame.c	2018-02-05 11:38:37.620270000 +0300
+@@ -36,7 +36,9 @@
+ *  in full conformance with specification v1.5.0
+ *  All related operations, including memory management, are handled by the library.
+ * */
+-
++#if defined(WITH_IPP)
++/* This source code file is modified with Intel(R) Integrated Performance Primitives content */
++#endif
+ 
+ /*-************************************
+ *  Compiler Options
+@@ -906,7 +908,11 @@
+             if (dctxPtr->tmpIn == NULL) return err0r(LZ4F_ERROR_allocation_failed);
+             FREEMEM(dctxPtr->tmpOutBuffer);
+             dctxPtr->maxBufferSize = 0;
++#if defined(WITH_IPP)
++            dctxPtr->tmpOutBuffer= (BYTE*)ALLOCATOR(bufferNeeded + 64);
++#else
+             dctxPtr->tmpOutBuffer= (BYTE*)ALLOCATOR(bufferNeeded);
++#endif
+             if (dctxPtr->tmpOutBuffer== NULL) return err0r(LZ4F_ERROR_allocation_failed);
+             dctxPtr->maxBufferSize = bufferNeeded;
+     }   }
+diff -w -ruN lz4-1.7.5.orig/lib/lz4hc.c lz4-1.7.5/lib/lz4hc.c
+--- lz4-1.7.5.orig/lib/lz4hc.c	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/lib/lz4hc.c	2018-02-05 11:38:37.631251000 +0300
+@@ -33,7 +33,11 @@
+ */
+ /* note : lz4hc is not an independent module, it requires lz4.h/lz4.c for proper compilation */
+ 
+-
++#if defined(WITH_IPP)
++/* This source code file is modified with Intel(R) Integrated Performance Primitives content */
++#include <ippdc.h>
++#include <ipps.h>
++#endif
+ /* *************************************
+ *  Tuning Parameter
+ ***************************************/
+@@ -129,6 +133,7 @@
+ }
+ 
+ 
++#if !defined(WITH_IPP)
+ FORCE_INLINE int LZ4HC_InsertAndFindBestMatch (LZ4HC_CCtx_internal* hc4,   /* Index table will be updated */
+                                                const BYTE* ip, const BYTE* const iLimit,
+                                                const BYTE** matchpos,
+@@ -246,7 +251,7 @@
+ 
+     return longest;
+ }
+-
++#endif
+ 
+ typedef enum { noLimit = 0, limitedOutput = 1 } limitedOutput_directive;
+ 
+@@ -307,6 +312,7 @@
+ 
+ #include "lz4opt.h"
+ 
++#if !defined(WITH_IPP)
+ static int LZ4HC_compress_hashChain (
+     LZ4HC_CCtx_internal* const ctx,
+     const char* const source,
+@@ -485,6 +491,7 @@
+     /* End */
+     return (int) (((char*)op)-dest);
+ }
++#endif
+ 
+ static int LZ4HC_getSearchNum(int compressionLevel)
+ {
+@@ -505,6 +512,7 @@
+     limitedOutput_directive limit
+     )
+ {
++#if !defined(WITH_IPP)
+     if (compressionLevel < 1) compressionLevel = LZ4HC_CLEVEL_DEFAULT;
+     if (compressionLevel > 9) {
+         switch (compressionLevel) {
+@@ -515,6 +523,22 @@
+         }
+     }
+     return LZ4HC_compress_hashChain(ctx, source, dest, inputSize, maxOutputSize, 1 << (compressionLevel-1), limit);
++#else
++    IppStatus   ippStat;
++    Ipp8u*      tables[2];
++    int         srcLen, dstLen;
++    
++    (void)limit;
++    tables[0] = (Ipp8u*)ctx->hashTable;
++    tables[1] = (Ipp8u*)ctx->chainTable;
++    srcLen = inputSize;
++    dstLen = maxOutputSize;
++    ippStat = ippsEncodeLZ4HC_8u((const Ipp8u*)source, 0, &srcLen, (Ipp8u*)dest, &dstLen, tables, NULL, 0, compressionLevel);
++    ctx->end += inputSize;
++    if (ippStat != ippStsNoErr)
++        return 0;
++    return dstLen;
++#endif
+ }
+ 
+ 
+@@ -539,7 +563,25 @@
+     LZ4_streamHC_t state;
+     LZ4_streamHC_t* const statePtr = &state;
+ #endif
++#if !defined(WITH_IPP)
+     int const cSize = LZ4_compress_HC_extStateHC(statePtr, src, dst, srcSize, maxDstSize, compressionLevel);
++#else
++    int cSize;
++    IppStatus ippStat;
++    int srcLen, dstLen;
++    Ipp8u* hashTables[2];
++
++    ippsSet_8u(0, (Ipp8u*)statePtr, sizeof(LZ4_streamHC_t));
++    srcLen = srcSize;
++    dstLen = maxDstSize;
++    hashTables[0] = (Ipp8u*)statePtr->internal_donotuse.hashTable;
++    hashTables[1] = (Ipp8u*)statePtr->internal_donotuse.chainTable;
++    ippStat = ippsEncodeLZ4HC_8u((const Ipp8u*)src, 0, &srcLen, (Ipp8u*)dst, &dstLen, hashTables, NULL, 0, compressionLevel);
++    if (ippStat != ippStsNoErr)
++        cSize = 0;
++    else
++        cSize = dstLen;
++#endif
+ #if defined(LZ4HC_HEAPMODE) && LZ4HC_HEAPMODE==1
+     free(statePtr);
+ #endif
+diff -w -ruN lz4-1.7.5.orig/lib/Makefile lz4-1.7.5/lib/Makefile
+--- lz4-1.7.5.orig/lib/Makefile	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/lib/Makefile	2018-02-05 15:21:08.176412000 +0300
+@@ -48,9 +48,53 @@
+            -Wswitch-enum -Wdeclaration-after-statement -Wstrict-prototypes -Wundef \
+            -Wpointer-arith -Wstrict-aliasing=1
+ CFLAGS  += $(MOREFLAGS)
+-FLAGS    = $(CPPFLAGS) $(CFLAGS) $(LDFLAGS)
+ 
++ifeq ($(WITH_IPP), yes)
++ifneq ($(ARCH), ia32)
++	ARCH = intel64
++endif
++	CFLAGS += -DWITH_IPP -I$(IPPROOT)/include
++ifeq ($(ARCH), ia32)
++	CFLAGS += -m32
++endif
+ 
++#
++# System configuration detection
++#
++SYSTEM_SFX := $(shell uname)
++ifeq ($(SYSTEM_SFX),Darwin)
++	G_SYSTEM := macOS
++else
++	G_SYSTEM := Linux
++endif
++
++ifeq ($(G_SYSTEM), macOS)
++        IPPLIBS64 := $(IPPROOT)/lib/libippdc.a $(IPPROOT)/lib/libipps.a $(IPPROOT)/lib/libippcore.a
++else
++        IPPLIBS64 := $(IPPROOT)/lib/intel64/libippdc.a $(IPPROOT)/lib/intel64/libipps.a $(IPPROOT)/lib/intel64/libippcore.a
++endif
++
++# For linking to dynamic libraries
++# IPPLIBS64 = -L$(IPPROOT)/lib/intel64 -lippdc -lipps -lippcore
++
++ifneq ($(G_SYSTEM), macOS)
++        IPPLIBS32 = $(IPPROOT)/lib/ia32/libippdc.a $(IPPROOT)/lib/ia32/libipps.a $(IPPROOT)/lib/ia32/libippcore.a
++else
++        IPPLIBS32 = $(IPPLIBS64)
++endif
++# For linking to dynamic libraries
++# IPPLIBS32 = -L$(IPPROOT)/lib/ia32 -lippdc -lipps -lippcore
++
++ifeq ($(ARCH), intel64)
++	IPPLIBS = $(IPPLIBS64)
++else
++	IPPLIBS = $(IPPLIBS32)
++endif
++# For ia32 build
++#IPPLIBS = $(IPPLIBS32)
++endif	# WITH_IPP
++
++FLAGS    = $(CPPFLAGS) $(CFLAGS) $(LDFLAGS)
+ 
+ # OS X linker doesn't support -soname, and use different extension
+ # see : https://developer.apple.com/library/mac/documentation/DeveloperTools/Conceptual/DynamicLibraries/100-Articles/DynamicLibraryDesignGuidelines.html
+@@ -60,7 +104,11 @@
+ 	SHARED_EXT_VER = $(LIBVER).$(SHARED_EXT)
+ 	SONAME_FLAGS = -install_name $(PREFIX)/lib/liblz4.$(SHARED_EXT_MAJOR) -compatibility_version $(LIBVER_MAJOR) -current_version $(LIBVER)
+ else
++ifeq ($(WITH_IPP), yes)
++	SONAME_FLAGS = -Wl,-soname=liblz4.$(SHARED_EXT).$(LIBVER_MAJOR) -Wl,--no-undefined
++else
+ 	SONAME_FLAGS = -Wl,-soname=liblz4.$(SHARED_EXT).$(LIBVER_MAJOR)
++endif
+ 	SHARED_EXT = so
+ 	SHARED_EXT_MAJOR = $(SHARED_EXT).$(LIBVER_MAJOR)
+ 	SHARED_EXT_VER = $(SHARED_EXT).$(LIBVER)
+@@ -93,7 +141,11 @@
+ 	@$(CC) $(FLAGS) -DLZ4_DLL_EXPORT=1 -shared $^ -o dll\$@.dll
+ 	dlltool -D dll\liblz4.dll -d dll\liblz4.def -l dll\liblz4.lib
+ else
++ifeq ($(WITH_IPP), yes)
++	@$(CC) $(FLAGS) -shared $^ $(IPPLIBS) -fPIC $(SONAME_FLAGS) -o $@
++else
+ 	@$(CC) $(FLAGS) -shared $^ -fPIC $(SONAME_FLAGS) -o $@
++endif
+ 	@echo creating versioned links
+ 	@ln -sf $@ liblz4.$(SHARED_EXT_MAJOR)
+ 	@ln -sf $@ liblz4.$(SHARED_EXT)
+diff -w -ruN lz4-1.7.5.orig/Makefile lz4-1.7.5/Makefile
+--- lz4-1.7.5.orig/Makefile	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/Makefile	2018-02-05 15:16:18.089635000 +0300
+@@ -53,25 +53,49 @@
+ .PHONY: default all lib lz4 clean test versionsTest examples
+ 
+ default:
++ifeq ($(WITH_IPP), yes)
++	@$(MAKE) -C $(LZ4DIR) ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@$(MAKE) -C $(PRGDIR) ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	@$(MAKE) -C $(LZ4DIR)
+ 	@$(MAKE) -C $(PRGDIR)
++endif
+ 	@cp $(PRGDIR)/lz4$(EXT) .
+ 
+ all:
++ifeq ($(WITH_IPP), yes)
++	@$(MAKE) -C $(LZ4DIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@$(MAKE) -C $(PRGDIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@$(MAKE) -C $(TESTDIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@$(MAKE) -C $(EXDIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	@$(MAKE) -C $(LZ4DIR) $@
+ 	@$(MAKE) -C $(PRGDIR) $@
+ 	@$(MAKE) -C $(TESTDIR) $@
+ 	@$(MAKE) -C $(EXDIR) $@
++endif
+ 
+ lib:
++ifeq ($(WITH_IPP), yes)
+ 	@$(MAKE) -C $(LZ4DIR)
++else
++	@$(MAKE) -C $(LZ4DIR) ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++endif
+ 
+ lz4:
++ifeq ($(WITH_IPP), yes)
++	@$(MAKE) -C $(PRGDIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	@$(MAKE) -C $(PRGDIR) $@
++endif
+ 	@cp $(PRGDIR)/lz4$(EXT) .
+ 
+ lz4-release:
++ifeq ($(WITH_IPP), yes)
++	@$(MAKE) -C $(PRGDIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	@$(MAKE) -C $(PRGDIR)
++endif
+ 	@cp $(PRGDIR)/lz4$(EXT) .
+ 
+ clean:
+@@ -91,30 +115,56 @@
+ HOST_OS = POSIX
+ 
+ install:
++ifeq ($(WITH_IPP), yes)
++	@$(MAKE) -C $(LZ4DIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@$(MAKE) -C $(PRGDIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	@$(MAKE) -C $(LZ4DIR) $@
+ 	@$(MAKE) -C $(PRGDIR) $@
++endif
+ 
+ uninstall:
++ifeq ($(WITH_IPP), yes)
++	@$(MAKE) -C $(LZ4DIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@$(MAKE) -C $(PRGDIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	@$(MAKE) -C $(LZ4DIR) $@
+ 	@$(MAKE) -C $(PRGDIR) $@
++endif
+ 
+ travis-install:
+ 	$(MAKE) -j1 install PREFIX=~/install_test_dir
+ 
+ test:
++ifeq ($(WITH_IPP), yes)
++	$(MAKE) -C $(TESTDIR) $@ ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	$(MAKE) -C $(TESTDIR) $@
++endif
+ 
+ clangtest: clean
+ 	clang -v
++ifeq ($(WITH_IPP), yes)
++	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(LZ4DIR)  all CC=clang ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(PRGDIR)  all CC=clang ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(TESTDIR) all CC=clang ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(LZ4DIR)  all CC=clang
+ 	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(PRGDIR)  all CC=clang
+ 	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(TESTDIR) all CC=clang
++endif
+ 
+ clangtest-native: clean
+ 	clang -v
++ifeq ($(WITH_IPP), yes)
++	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(LZ4DIR)  all    CC=clang ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(PRGDIR)  native CC=clang ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(TESTDIR) native CC=clang ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(LZ4DIR)  all    CC=clang
+ 	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(PRGDIR)  native CC=clang
+ 	@CFLAGS="-O3 -Werror -Wconversion -Wno-sign-conversion" $(MAKE) -C $(TESTDIR) native CC=clang
++endif
+ 
+ usan: clean
+ 	CC=clang CFLAGS="-O3 -g -fsanitize=undefined" $(MAKE) test FUZZER_TIME="-T1mn" NB_LOOPS=-i1
+@@ -137,9 +187,15 @@
+ 	$(MAKE) -C $(TESTDIR) $@
+ 
+ examples:
++ifeq ($(WITH_IPP), yes)
++	$(MAKE) -C $(LZ4DIR) ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++	$(MAKE) -C $(PRGDIR)  ARCH=$(ARCH) WITH_IPP=$(WITH_IPP) lz4
++	$(MAKE) -C  examples test ARCH=$(ARCH) WITH_IPP=$(WITH_IPP)
++else
+ 	$(MAKE) -C $(LZ4DIR)
+ 	$(MAKE) -C $(PRGDIR) lz4
+ 	$(MAKE) -C examples test
++endif
+ 
+ endif
+ 
+diff -w -ruN lz4-1.7.5.orig/programs/Makefile lz4-1.7.5/programs/Makefile
+--- lz4-1.7.5.orig/programs/Makefile	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/programs/Makefile	2018-02-05 15:12:27.388247000 +0300
+@@ -49,6 +49,46 @@
+            -Wswitch-enum -Wdeclaration-after-statement -Wstrict-prototypes \
+            -Wpointer-arith -Wstrict-aliasing=1
+ CFLAGS  += $(MOREFLAGS)
++
++ifeq ($(WITH_IPP), yes)
++CFLAGS += -DWITH_IPP -I$(IPPROOT)/include
++ifeq ($(ARCH), ia32)
++CFLAGS += -m32
++endif
++#
++# System configuration detection
++#
++SYSTEM_SFX := $(shell uname)
++ifeq ($(SYSTEM_SFX),Darwin)
++	G_SYSTEM := macOS
++else
++	G_SYSTEM := Linux
++endif
++
++ifeq ($(G_SYSTEM), macOS)
++        IPPLIBS64 := $(IPPROOT)/lib/libippdc.a $(IPPROOT)/lib/libipps.a $(IPPROOT)/lib/libippcore.a
++else
++        IPPLIBS64 := $(IPPROOT)/lib/intel64/libippdc.a $(IPPROOT)/lib/intel64/libipps.a $(IPPROOT)/lib/intel64/libippcore.a
++endif
++
++# For linking to dynamic libraries
++#IPPLIBS64 = -L$(IPPROOT)/lib/intel64 -lippdc -lipps -lippcore
++
++ifneq ($(G_SYSTEM), macOS)
++        IPPLIBS32 = $(IPPROOT)/lib/ia32/libippdc.a $(IPPROOT)/lib/ia32/libipps.a $(IPPROOT)/lib/ia32/libippcore.a
++else
++        IPPLIBS32 = $(IPPLIBS64)
++endif
++# For linking to dynamic libraries
++#IPPLIBS32 = -L$(IPPROOT)/lib/ia32 -lippdc -lipps -lippcore
++
++ifeq ($(ARCH), ia32)
++	IPPLIBS = $(IPPLIBS32)
++else
++	IPPLIBS = $(IPPLIBS64)
++endif
++endif
++
+ FLAGS    = $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
+ 
+ LZ4_VERSION=$(LIBVER)
+@@ -72,22 +112,37 @@
+ all: lz4 lz4c
+ 
+ all32: CFLAGS+=-m32
++ifeq ($(WITH_IPP), yes)
++all32: IPPLIBS = $(IPPLIBS32)
++endif
+ all32: all
+ 
+ lz4: CFLAGS += $(DEBUGFLAGS)
+ lz4: $(OBJFILES)
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ lz4-release: DEBUGFLAGS=
+ lz4-release: lz4
+ 
+ lz4c  : CFLAGS += $(DEBUGFLAGS)
+ lz4c  : $(SRCFILES)
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) -DENABLE_LZ4C_LEGACY_OPTIONS $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) -DENABLE_LZ4C_LEGACY_OPTIONS $^ -o $@$(EXT)
++endif
+ 
+ lz4c32: CFLAGS += -m32 $(DEBUGFLAGS)
+ lz4c32: $(SRCFILES)
++ifeq ($(WITH_IPP), yes)
+ 	$(CC) $(FLAGS) $^ -o $@$(EXT)
++else
++	$(CC) $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++endif
+ 
+ clean:
+ 	@$(MAKE) -C $(LZ4DIR) $@ > $(VOID)
+diff -w -ruN lz4-1.7.5.orig/tests/Makefile lz4-1.7.5/tests/Makefile
+--- lz4-1.7.5.orig/tests/Makefile	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/tests/Makefile	2018-02-05 15:14:04.357143000 +0300
+@@ -43,9 +43,51 @@
+            -Wdeclaration-after-statement -Wstrict-prototypes \
+            -Wpointer-arith -Wstrict-aliasing=1
+ CFLAGS  += $(MOREFLAGS)
++
++ifeq ($(WITH_IPP), yes)
++CFLAGS += -DWITH_IPP -I$(IPPROOT)/include
++ifeq ($(ARCH), ia32)
++CFLAGS += -m32
++endif
++
++endif
++
+ CPPFLAGS:= -I$(LIBDIR) -I$(PRGDIR) -DXXH_NAMESPACE=LZ4_
+ FLAGS    = $(CFLAGS) $(CPPFLAGS) $(LDFLAGS)
+ 
++ifeq ($(WITH_IPP), yes)
++#
++# System configuration detection
++#
++SYSTEM_SFX := $(shell uname)
++ifeq ($(SYSTEM_SFX),Darwin)
++	G_SYSTEM := macOS
++else
++	G_SYSTEM := Linux
++endif
++
++ifeq ($(G_SYSTEM), macOS)
++        IPPLIBS64 := $(IPPROOT)/lib/libippdc.a $(IPPROOT)/lib/libipps.a $(IPPROOT)/lib/libippcore.a
++else
++        IPPLIBS64 := $(IPPROOT)/lib/intel64/libippdc.a $(IPPROOT)/lib/intel64/libipps.a $(IPPROOT)/lib/intel64/libippcore.a
++endif
++
++# For linking to dynamic libraries
++#IPPLIBS64 = -L$(IPPROOT)/lib/intel64 -lippdc -lipps -lippcore
++#IPPLIBS32 = -L$(IPPROOT)/lib/ia32 -lippdc -lipps -lippcore
++
++ifneq ($(G_SYSTEM), macOS)
++        IPPLIBS32 = $(IPPROOT)/lib/ia32/libippdc.a $(IPPROOT)/lib/ia32/libipps.a $(IPPROOT)/lib/ia32/libippcore.a
++else
++        IPPLIBS32 = $(IPPLIBS64)
++endif
++
++ifeq ($(ARCH), intel64)
++	IPPLIBS := $(IPPLIBS64)
++else
++	IPPLIBS := $(IPPLIBS32)
++endif
++endif
+ 
+ # Define *.exe as extension for Windows systems
+ ifneq (,$(filter Windows%,$(OS)))
+@@ -68,39 +110,70 @@
+ 
+ all32: CFLAGS+=-m32
+ all32: all
++ifeq ($(WITH_IPP), yes)
++	IPPLIBS = $(IPPLIBS32)
++endif
+ 
+ lz4:
+-	$(MAKE) -C $(PRGDIR) clean $@ CFLAGS="$(CFLAGS)"
++	$(MAKE) -C $(PRGDIR) clean $@ CFLAGS="$(CFLAGS)" WITH_IPP=$(WITH_IPP) ARCH=$(ARCH)
+ 
+ lz4c:
+-	$(MAKE) -C $(PRGDIR) clean $@ CFLAGS="$(CFLAGS)"
++	$(MAKE) -C $(PRGDIR) clean $@ CFLAGS="$(CFLAGS)" WITH_IPP=$(WITH_IPP) ARCH=$(ARCH)
+ 
+ lz4c32:   # create a 32-bits version for 32/64 interop tests
+-	$(MAKE) -C $(PRGDIR) clean $@ CFLAGS="-m32 $(CFLAGS)"
++	$(MAKE) -C $(PRGDIR) clean $@ CFLAGS="-m32 $(CFLAGS)" WITH_IPP=$(WITH_IPP) ARCH=$(ARCH)
+ 	cp $(LZ4) $(LZ4)c32
+ 
+ fullbench  : $(LIBDIR)/lz4.o $(LIBDIR)/lz4hc.o $(LIBDIR)/lz4frame.o $(LIBDIR)/xxhash.o fullbench.c
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ fullbench-lib: fullbench.c $(LIBDIR)/xxhash.c
+ 	$(MAKE) -C $(LIBDIR) liblz4.a
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) $^ -o $@$(EXT) $(LIBDIR)/liblz4.a $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) $^ -o $@$(EXT) $(LIBDIR)/liblz4.a
++endif
+ 
+ fullbench-dll: fullbench.c $(LIBDIR)/xxhash.c
+ 	$(MAKE) -C $(LIBDIR) liblz4
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) $^ -o $@$(EXT) -DLZ4_DLL_IMPORT=1 $(LIBDIR)/dll/liblz4.dll $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) $^ -o $@$(EXT) -DLZ4_DLL_IMPORT=1 $(LIBDIR)/dll/liblz4.dll
++endif
+ 
+ fuzzer  : $(LIBDIR)/lz4.o $(LIBDIR)/lz4hc.o $(LIBDIR)/xxhash.o fuzzer.c
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ frametest: $(LIBDIR)/lz4frame.o $(LIBDIR)/lz4.o $(LIBDIR)/lz4hc.o $(LIBDIR)/xxhash.o frametest.c
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ fasttest: $(LIBDIR)/lz4.o fasttest.c
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) $^ -o $@$(EXT)
++endif
+ 
+ datagen : $(PRGDIR)/datagen.c datagencli.c
++ifeq ($(WITH_IPP), yes)
++	$(CC) $(FLAGS) -I$(PRGDIR) $^ -o $@$(EXT) $(IPPLIBS)
++else
+ 	$(CC) $(FLAGS) -I$(PRGDIR) $^ -o $@$(EXT)
++endif
+ 
+ clean:
+ 	@$(MAKE) -C $(LIBDIR) $@ > $(VOID)
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/datagen/datagen.vcxproj lz4-1.7.5/visual/VS2010/datagen/datagen.vcxproj
+--- lz4-1.7.5.orig/visual/VS2010/datagen/datagen.vcxproj	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/datagen/datagen.vcxproj	2018-02-05 11:38:37.702243000 +0300
+@@ -1,6 +1,14 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+   <ItemGroup Label="ProjectConfigurations">
++    <ProjectConfiguration Include="Debug_IPP|Win32">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Debug_IPP|x64">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Debug|Win32">
+       <Configuration>Debug</Configuration>
+       <Platform>Win32</Platform>
+@@ -9,6 +17,14 @@
+       <Configuration>Debug</Configuration>
+       <Platform>x64</Platform>
+     </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|Win32">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|x64">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Release|Win32">
+       <Configuration>Release</Configuration>
+       <Platform>Win32</Platform>
+@@ -31,57 +47,109 @@
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+   </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <PropertyGroup Label="UserMacros" />
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\programs;$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\programs;$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\programs;$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\programs;$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\programs;$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\programs;$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\programs;$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\programs;$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -97,6 +165,22 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -113,6 +197,23 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -132,6 +233,26 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)/include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -147,6 +268,27 @@
+     </ClCompile>
+     <Link>
+       <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++    </Link>
++  </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)/include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+       <EnableCOMDATFolding>true</EnableCOMDATFolding>
+       <OptimizeReferences>true</OptimizeReferences>
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/frametest/frametest.vcxproj lz4-1.7.5/visual/VS2010/frametest/frametest.vcxproj
+--- lz4-1.7.5.orig/visual/VS2010/frametest/frametest.vcxproj	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/frametest/frametest.vcxproj	2018-02-05 11:38:37.731241000 +0300
+@@ -1,6 +1,14 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+   <ItemGroup Label="ProjectConfigurations">
++    <ProjectConfiguration Include="Debug_IPP|Win32">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Debug_IPP|x64">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Debug|Win32">
+       <Configuration>Debug</Configuration>
+       <Platform>Win32</Platform>
+@@ -9,6 +17,14 @@
+       <Configuration>Debug</Configuration>
+       <Platform>x64</Platform>
+     </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|Win32">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|x64">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Release|Win32">
+       <Configuration>Release</Configuration>
+       <Platform>Win32</Platform>
+@@ -31,57 +47,109 @@
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+   </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <PropertyGroup Label="UserMacros" />
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -97,6 +165,24 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -113,6 +199,25 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -132,6 +237,28 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -152,6 +279,29 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemGroup>
+     <ClCompile Include="..\..\..\lib\lz4.c" />
+     <ClCompile Include="..\..\..\lib\lz4frame.c" />
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/fullbench/fullbench.vcxproj lz4-1.7.5/visual/VS2010/fullbench/fullbench.vcxproj
+--- lz4-1.7.5.orig/visual/VS2010/fullbench/fullbench.vcxproj	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/fullbench/fullbench.vcxproj	2018-02-05 11:38:37.742246000 +0300
+@@ -1,6 +1,14 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+   <ItemGroup Label="ProjectConfigurations">
++    <ProjectConfiguration Include="Debug_IPP|Win32">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Debug_IPP|x64">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Debug|Win32">
+       <Configuration>Debug</Configuration>
+       <Platform>Win32</Platform>
+@@ -9,6 +17,14 @@
+       <Configuration>Debug</Configuration>
+       <Platform>x64</Platform>
+     </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|Win32">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|x64">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Release|Win32">
+       <Configuration>Release</Configuration>
+       <Platform>Win32</Platform>
+@@ -31,57 +47,109 @@
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+   </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <PropertyGroup Label="UserMacros" />
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -97,6 +165,24 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -113,6 +199,25 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -132,6 +237,28 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -152,6 +279,29 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)/include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemGroup>
+     <ClCompile Include="..\..\..\lib\lz4.c" />
+     <ClCompile Include="..\..\..\lib\lz4frame.c" />
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/fullbench-dll/fullbench-dll.vcxproj lz4-1.7.5/visual/VS2010/fullbench-dll/fullbench-dll.vcxproj
+--- lz4-1.7.5.orig/visual/VS2010/fullbench-dll/fullbench-dll.vcxproj	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/fullbench-dll/fullbench-dll.vcxproj	2018-02-05 11:38:37.752275000 +0300
+@@ -1,6 +1,14 @@
+ ﻿<?xml version="1.0" encoding="utf-8"?>
+ <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+   <ItemGroup Label="ProjectConfigurations">
++    <ProjectConfiguration Include="Debug_IPP|Win32">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Debug_IPP|x64">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Debug|Win32">
+       <Configuration>Debug</Configuration>
+       <Platform>Win32</Platform>
+@@ -9,6 +17,14 @@
+       <Configuration>Debug</Configuration>
+       <Platform>x64</Platform>
+     </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|Win32">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|x64">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Release|Win32">
+       <Configuration>Release</Configuration>
+       <Platform>Win32</Platform>
+@@ -31,57 +47,109 @@
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+   </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <PropertyGroup Label="UserMacros" />
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -99,6 +167,23 @@
+       <AdditionalDependencies>liblz4.lib;%(AdditionalDependencies)</AdditionalDependencies>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;LZ4_DLL_IMPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(SolutionDir)bin\$(Platform)_$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
++      <AdditionalDependencies>liblz4.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -117,6 +202,24 @@
+       <AdditionalDependencies>liblz4.lib;%(AdditionalDependencies)</AdditionalDependencies>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;LZ4_DLL_IMPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(SolutionDir)bin\$(Platform)_$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
++      <AdditionalDependencies>liblz4.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -138,6 +241,27 @@
+       <AdditionalDependencies>liblz4.lib;%(AdditionalDependencies)</AdditionalDependencies>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;LZ4_DLL_IMPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(SolutionDir)bin\$(Platform)_$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
++      <AdditionalDependencies>liblz4.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -150,6 +274,28 @@
+       <TreatWarningAsError>false</TreatWarningAsError>
+       <EnablePREfast>true</EnablePREfast>
+       <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(SolutionDir)bin\$(Platform)_$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
++      <AdditionalDependencies>liblz4.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;LZ4_DLL_IMPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
+     </ClCompile>
+     <Link>
+       <SubSystem>Console</SubSystem>
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/fuzzer/fuzzer.vcxproj lz4-1.7.5/visual/VS2010/fuzzer/fuzzer.vcxproj
+--- lz4-1.7.5.orig/visual/VS2010/fuzzer/fuzzer.vcxproj	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/fuzzer/fuzzer.vcxproj	2018-02-05 11:38:37.769236000 +0300
+@@ -1,6 +1,14 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+   <ItemGroup Label="ProjectConfigurations">
++    <ProjectConfiguration Include="Debug_IPP|Win32">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Debug_IPP|x64">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Debug|Win32">
+       <Configuration>Debug</Configuration>
+       <Platform>Win32</Platform>
+@@ -9,6 +17,14 @@
+       <Configuration>Debug</Configuration>
+       <Platform>x64</Platform>
+     </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|Win32">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|x64">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Release|Win32">
+       <Configuration>Release</Configuration>
+       <Platform>Win32</Platform>
+@@ -31,57 +47,109 @@
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+   </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <PropertyGroup Label="UserMacros" />
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(SolutionDir)..\..\programs;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -97,6 +165,24 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -113,6 +199,25 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -132,6 +237,28 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -152,6 +279,29 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemGroup>
+     <ClCompile Include="..\..\..\lib\lz4.c" />
+     <ClCompile Include="..\..\..\lib\lz4hc.c" />
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/liblz4/liblz4.vcxproj lz4-1.7.5/visual/VS2010/liblz4/liblz4.vcxproj
+--- lz4-1.7.5.orig/visual/VS2010/liblz4/liblz4.vcxproj	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/liblz4/liblz4.vcxproj	2018-02-05 11:38:37.778270000 +0300
+@@ -1,6 +1,14 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+   <ItemGroup Label="ProjectConfigurations">
++    <ProjectConfiguration Include="Debug_IPP|Win32">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Debug_IPP|x64">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Debug|Win32">
+       <Configuration>Debug</Configuration>
+       <Platform>Win32</Platform>
+@@ -9,6 +17,14 @@
+       <Configuration>Debug</Configuration>
+       <Platform>x64</Platform>
+     </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|Win32">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|x64">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Release|Win32">
+       <Configuration>Release</Configuration>
+       <Platform>Win32</Platform>
+@@ -31,61 +47,117 @@
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>StaticLibrary</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+     <ConfigurationType>StaticLibrary</ConfigurationType>
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="Configuration">
++    <ConfigurationType>StaticLibrary</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>StaticLibrary</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>StaticLibrary</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+     <ConfigurationType>StaticLibrary</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="Configuration">
++    <ConfigurationType>StaticLibrary</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+   </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <PropertyGroup Label="UserMacros" />
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <LinkIncremental>true</LinkIncremental>
+     <TargetName>liblz4_static</TargetName>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <LinkIncremental>true</LinkIncremental>
++    <TargetName>liblz4_static</TargetName>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <LinkIncremental>true</LinkIncremental>
+     <TargetName>liblz4_static</TargetName>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <LinkIncremental>true</LinkIncremental>
++    <TargetName>liblz4_static</TargetName>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <LinkIncremental>false</LinkIncremental>
+     <TargetName>liblz4_static</TargetName>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <LinkIncremental>false</LinkIncremental>
++    <TargetName>liblz4_static</TargetName>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <LinkIncremental>false</LinkIncremental>
+     <TargetName>liblz4_static</TargetName>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <LinkIncremental>false</LinkIncremental>
++    <TargetName>liblz4_static</TargetName>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -100,6 +172,21 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;LZ4_DLL_EXPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -115,6 +202,22 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;LZ4_DLL_EXPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -133,6 +236,25 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;LZ4_DLL_EXPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -148,6 +270,26 @@
+     </ClCompile>
+     <Link>
+       <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++    </Link>
++  </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;LZ4_DLL_EXPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
+       <EnableCOMDATFolding>true</EnableCOMDATFolding>
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/liblz4-dll/liblz4-dll.vcxproj lz4-1.7.5/visual/VS2010/liblz4-dll/liblz4-dll.vcxproj
+--- lz4-1.7.5.orig/visual/VS2010/liblz4-dll/liblz4-dll.vcxproj	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/liblz4-dll/liblz4-dll.vcxproj	2018-02-05 11:38:37.789248000 +0300
+@@ -1,6 +1,14 @@
+ ﻿<?xml version="1.0" encoding="utf-8"?>
+ <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+   <ItemGroup Label="ProjectConfigurations">
++    <ProjectConfiguration Include="Debug_IPP|Win32">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Debug_IPP|x64">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Debug|Win32">
+       <Configuration>Debug</Configuration>
+       <Platform>Win32</Platform>
+@@ -9,6 +17,14 @@
+       <Configuration>Debug</Configuration>
+       <Platform>x64</Platform>
+     </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|Win32">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|x64">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Release|Win32">
+       <Configuration>Release</Configuration>
+       <Platform>Win32</Platform>
+@@ -32,61 +48,117 @@
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>DynamicLibrary</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+     <ConfigurationType>DynamicLibrary</ConfigurationType>
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="Configuration">
++    <ConfigurationType>DynamicLibrary</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>DynamicLibrary</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>DynamicLibrary</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+     <ConfigurationType>DynamicLibrary</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="Configuration">
++    <ConfigurationType>DynamicLibrary</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+   </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <PropertyGroup Label="UserMacros" />
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <LinkIncremental>true</LinkIncremental>
+     <TargetName>liblz4</TargetName>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <LinkIncremental>true</LinkIncremental>
++    <TargetName>liblz4</TargetName>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <LinkIncremental>true</LinkIncremental>
+     <TargetName>liblz4</TargetName>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <LinkIncremental>true</LinkIncremental>
++    <TargetName>liblz4</TargetName>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <LinkIncremental>false</LinkIncremental>
+     <TargetName>liblz4</TargetName>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <LinkIncremental>false</LinkIncremental>
++    <TargetName>liblz4</TargetName>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <LinkIncremental>false</LinkIncremental>
+     <TargetName>liblz4</TargetName>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <LinkIncremental>false</LinkIncremental>
++    <TargetName>liblz4</TargetName>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -101,6 +173,23 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;LZ4_DLL_EXPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -116,6 +205,24 @@
+       <GenerateDebugInformation>true</GenerateDebugInformation>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;LZ4_DLL_EXPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -134,6 +241,27 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;LZ4_DLL_EXPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -153,6 +281,28 @@
+       <OptimizeReferences>true</OptimizeReferences>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;LZ4_DLL_EXPORT=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++      <AdditionalDependencies>ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemGroup>
+     <ClInclude Include="..\..\..\lib\lz4.h" />
+     <ClInclude Include="..\..\..\lib\lz4frame.h" />
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/lz4/lz4.vcxproj lz4-1.7.5/visual/VS2010/lz4/lz4.vcxproj
+--- lz4-1.7.5.orig/visual/VS2010/lz4/lz4.vcxproj	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/lz4/lz4.vcxproj	2018-02-05 11:38:37.800235000 +0300
+@@ -1,6 +1,14 @@
+ ﻿<?xml version="1.0" encoding="utf-8"?>
+ <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+   <ItemGroup Label="ProjectConfigurations">
++    <ProjectConfiguration Include="Debug_IPP|Win32">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Debug_IPP|x64">
++      <Configuration>Debug_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Debug|Win32">
+       <Configuration>Debug</Configuration>
+       <Platform>Win32</Platform>
+@@ -9,6 +17,14 @@
+       <Configuration>Debug</Configuration>
+       <Platform>x64</Platform>
+     </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|Win32">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>Win32</Platform>
++    </ProjectConfiguration>
++    <ProjectConfiguration Include="Release_IPP|x64">
++      <Configuration>Release_IPP</Configuration>
++      <Platform>x64</Platform>
++    </ProjectConfiguration>
+     <ProjectConfiguration Include="Release|Win32">
+       <Configuration>Release</Configuration>
+       <Platform>Win32</Platform>
+@@ -31,57 +47,109 @@
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>true</UseDebugLibraries>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>true</UseDebugLibraries>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+     <ConfigurationType>Application</ConfigurationType>
+     <UseDebugLibraries>false</UseDebugLibraries>
+     <WholeProgramOptimization>true</WholeProgramOptimization>
+     <CharacterSet>Unicode</CharacterSet>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="Configuration">
++    <ConfigurationType>Application</ConfigurationType>
++    <UseDebugLibraries>false</UseDebugLibraries>
++    <WholeProgramOptimization>true</WholeProgramOptimization>
++    <CharacterSet>Unicode</CharacterSet>
++  </PropertyGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+   <ImportGroup Label="ExtensionSettings">
+   </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+   </ImportGroup>
++  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'" Label="PropertySheets">
++    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
++  </ImportGroup>
+   <PropertyGroup Label="UserMacros" />
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <LinkIncremental>true</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <LinkIncremental>true</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++  </PropertyGroup>
+   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <LinkIncremental>false</LinkIncremental>
+     <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
+     <RunCodeAnalysis>true</RunCodeAnalysis>
+   </PropertyGroup>
++  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <LinkIncremental>false</LinkIncremental>
++    <IncludePath>$(IncludePath);$(UniversalCRT_IncludePath);$(SolutionDir)..\..\lib;$(VCInstallDir)include;$(VCInstallDir)atlmfc\include;$(WindowsSDK_IncludePath);</IncludePath>
++    <RunCodeAnalysis>true</RunCodeAnalysis>
++  </PropertyGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -98,6 +166,24 @@
+       <AdditionalDependencies>setargv.obj;%(AdditionalDependencies)</AdditionalDependencies>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|Win32'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalDependencies>setargv.obj;ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+       <PrecompiledHeader>
+@@ -115,6 +201,25 @@
+       <AdditionalDependencies>setargv.obj;%(AdditionalDependencies)</AdditionalDependencies>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_IPP|x64'">
++    <ClCompile>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <WarningLevel>Level4</WarningLevel>
++      <Optimization>Disabled</Optimization>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>true</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <AdditionalDependencies>setargv.obj;ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -135,6 +240,28 @@
+       <AdditionalDependencies>setargv.obj;%(AdditionalDependencies)</AdditionalDependencies>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|Win32'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>false</EnablePREfast>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalDependencies>setargv.obj;ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\ia32</AdditionalLibraryDirectories>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+     <ClCompile>
+       <WarningLevel>Level4</WarningLevel>
+@@ -156,6 +283,29 @@
+       <AdditionalDependencies>setargv.obj;%(AdditionalDependencies)</AdditionalDependencies>
+     </Link>
+   </ItemDefinitionGroup>
++  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_IPP|x64'">
++    <ClCompile>
++      <WarningLevel>Level4</WarningLevel>
++      <PrecompiledHeader>
++      </PrecompiledHeader>
++      <Optimization>MaxSpeed</Optimization>
++      <FunctionLevelLinking>true</FunctionLevelLinking>
++      <IntrinsicFunctions>true</IntrinsicFunctions>
++      <PreprocessorDefinitions>WITH_IPP;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
++      <TreatWarningAsError>false</TreatWarningAsError>
++      <EnablePREfast>true</EnablePREfast>
++      <AdditionalOptions>/analyze:stacksize295252 %(AdditionalOptions)</AdditionalOptions>
++      <AdditionalIncludeDirectories>$(IPPROOT)\include</AdditionalIncludeDirectories>
++    </ClCompile>
++    <Link>
++      <SubSystem>Console</SubSystem>
++      <GenerateDebugInformation>true</GenerateDebugInformation>
++      <EnableCOMDATFolding>true</EnableCOMDATFolding>
++      <OptimizeReferences>true</OptimizeReferences>
++      <AdditionalDependencies>setargv.obj;ippdcmt.lib;ippsmt.lib;ippcoremt.lib;%(AdditionalDependencies)</AdditionalDependencies>
++      <AdditionalLibraryDirectories>$(IPPROOT)\lib\intel64</AdditionalLibraryDirectories>
++    </Link>
++  </ItemDefinitionGroup>
+   <ItemGroup>
+     <ClInclude Include="..\..\..\lib\lz4.h" />
+     <ClInclude Include="..\..\..\lib\lz4frame.h" />
+diff -w -ruN lz4-1.7.5.orig/visual/VS2010/lz4.sln lz4-1.7.5/visual/VS2010/lz4.sln
+--- lz4-1.7.5.orig/visual/VS2010/lz4.sln	2017-01-03 08:09:52.000000000 +0300
++++ lz4-1.7.5/visual/VS2010/lz4.sln	2018-02-05 11:38:37.809240000 +0300
+@@ -21,72 +21,140 @@
+ EndProject
+ Global
+ 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
++		Debug_IPP|Win32 = Debug_IPP|Win32
++		Debug_IPP|x64 = Debug_IPP|x64
+ 		Debug|Win32 = Debug|Win32
+ 		Debug|x64 = Debug|x64
++		Release_IPP|Win32 = Release_IPP|Win32
++		Release_IPP|x64 = Release_IPP|x64
+ 		Release|Win32 = Release|Win32
+ 		Release|x64 = Release|x64
+ 	EndGlobalSection
+ 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
++		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Debug_IPP|Win32.ActiveCfg = Debug_IPP|Win32
++		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Debug_IPP|Win32.Build.0 = Debug_IPP|Win32
++		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Debug_IPP|x64.ActiveCfg = Debug_IPP|x64
++		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Debug_IPP|x64.Build.0 = Debug_IPP|x64
+ 		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Debug|Win32.ActiveCfg = Debug|Win32
+ 		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Debug|Win32.Build.0 = Debug|Win32
+ 		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Debug|x64.ActiveCfg = Debug|x64
+ 		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Debug|x64.Build.0 = Debug|x64
++		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Release_IPP|Win32.ActiveCfg = Release_IPP|Win32
++		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Release_IPP|Win32.Build.0 = Release_IPP|Win32
++		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Release_IPP|x64.ActiveCfg = Release_IPP|x64
++		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Release_IPP|x64.Build.0 = Release_IPP|x64
+ 		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Release|Win32.ActiveCfg = Release|Win32
+ 		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Release|Win32.Build.0 = Release|Win32
+ 		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Release|x64.ActiveCfg = Release|x64
+ 		{E30329AC-0057-4FE0-8FDA-7F650D398C4C}.Release|x64.Build.0 = Release|x64
++		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Debug_IPP|Win32.ActiveCfg = Debug_IPP|Win32
++		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Debug_IPP|Win32.Build.0 = Debug_IPP|Win32
++		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Debug_IPP|x64.ActiveCfg = Debug_IPP|x64
++		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Debug_IPP|x64.Build.0 = Debug_IPP|x64
+ 		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Debug|Win32.ActiveCfg = Debug|Win32
+ 		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Debug|Win32.Build.0 = Debug|Win32
+ 		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Debug|x64.ActiveCfg = Debug|x64
+ 		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Debug|x64.Build.0 = Debug|x64
++		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Release_IPP|Win32.ActiveCfg = Release_IPP|Win32
++		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Release_IPP|Win32.Build.0 = Release_IPP|Win32
++		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Release_IPP|x64.ActiveCfg = Release_IPP|x64
++		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Release_IPP|x64.Build.0 = Release_IPP|x64
+ 		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Release|Win32.ActiveCfg = Release|Win32
+ 		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Release|Win32.Build.0 = Release|Win32
+ 		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Release|x64.ActiveCfg = Release|x64
+ 		{9800039D-4AAA-43A4-BB78-FEF6F4836927}.Release|x64.Build.0 = Release|x64
++		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Debug_IPP|Win32.ActiveCfg = Debug_IPP|Win32
++		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Debug_IPP|Win32.Build.0 = Debug_IPP|Win32
++		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Debug_IPP|x64.ActiveCfg = Debug_IPP|x64
++		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Debug_IPP|x64.Build.0 = Debug_IPP|x64
+ 		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Debug|Win32.ActiveCfg = Debug|Win32
+ 		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Debug|Win32.Build.0 = Debug|Win32
+ 		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Debug|x64.ActiveCfg = Debug|x64
+ 		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Debug|x64.Build.0 = Debug|x64
++		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Release_IPP|Win32.ActiveCfg = Release_IPP|Win32
++		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Release_IPP|Win32.Build.0 = Release_IPP|Win32
++		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Release_IPP|x64.ActiveCfg = Release_IPP|x64
++		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Release_IPP|x64.Build.0 = Release_IPP|x64
+ 		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Release|Win32.ActiveCfg = Release|Win32
+ 		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Release|Win32.Build.0 = Release|Win32
+ 		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Release|x64.ActiveCfg = Release|x64
+ 		{9092C5CC-3E71-41B3-BF68-4A7BDD8A5476}.Release|x64.Build.0 = Release|x64
++		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Debug_IPP|Win32.ActiveCfg = Debug_IPP|Win32
++		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Debug_IPP|Win32.Build.0 = Debug_IPP|Win32
++		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Debug_IPP|x64.ActiveCfg = Debug_IPP|x64
++		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Debug_IPP|x64.Build.0 = Debug_IPP|x64
+ 		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Debug|Win32.ActiveCfg = Debug|Win32
+ 		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Debug|Win32.Build.0 = Debug|Win32
+ 		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Debug|x64.ActiveCfg = Debug|x64
+ 		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Debug|x64.Build.0 = Debug|x64
++		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Release_IPP|Win32.ActiveCfg = Release_IPP|Win32
++		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Release_IPP|Win32.Build.0 = Release_IPP|Win32
++		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Release_IPP|x64.ActiveCfg = Release_IPP|x64
++		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Release_IPP|x64.Build.0 = Release_IPP|x64
+ 		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Release|Win32.ActiveCfg = Release|Win32
+ 		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Release|Win32.Build.0 = Release|Win32
+ 		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Release|x64.ActiveCfg = Release|x64
+ 		{18B9F1A7-9C66-4352-898B-30804DADE0FD}.Release|x64.Build.0 = Release|x64
++		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Debug_IPP|Win32.ActiveCfg = Debug_IPP|Win32
++		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Debug_IPP|Win32.Build.0 = Debug_IPP|Win32
++		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Debug_IPP|x64.ActiveCfg = Debug_IPP|x64
++		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Debug_IPP|x64.Build.0 = Debug_IPP|x64
+ 		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Debug|Win32.ActiveCfg = Debug|Win32
+ 		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Debug|Win32.Build.0 = Debug|Win32
+ 		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Debug|x64.ActiveCfg = Debug|x64
+ 		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Debug|x64.Build.0 = Debug|x64
++		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Release_IPP|Win32.ActiveCfg = Release_IPP|Win32
++		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Release_IPP|Win32.Build.0 = Release_IPP|Win32
++		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Release_IPP|x64.ActiveCfg = Release_IPP|x64
++		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Release_IPP|x64.Build.0 = Release_IPP|x64
+ 		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Release|Win32.ActiveCfg = Release|Win32
+ 		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Release|Win32.Build.0 = Release|Win32
+ 		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Release|x64.ActiveCfg = Release|x64
+ 		{6A4DF4EF-C77F-43C6-8901-DDCD20879E4E}.Release|x64.Build.0 = Release|x64
++		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Debug_IPP|Win32.ActiveCfg = Debug_IPP|Win32
++		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Debug_IPP|Win32.Build.0 = Debug_IPP|Win32
++		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Debug_IPP|x64.ActiveCfg = Debug_IPP|x64
++		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Debug_IPP|x64.Build.0 = Debug_IPP|x64
+ 		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Debug|Win32.ActiveCfg = Debug|Win32
+ 		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Debug|Win32.Build.0 = Debug|Win32
+ 		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Debug|x64.ActiveCfg = Debug|x64
+ 		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Debug|x64.Build.0 = Debug|x64
++		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Release_IPP|Win32.ActiveCfg = Release_IPP|Win32
++		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Release_IPP|Win32.Build.0 = Release_IPP|Win32
++		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Release_IPP|x64.ActiveCfg = Release_IPP|x64
++		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Release_IPP|x64.Build.0 = Release_IPP|x64
+ 		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Release|Win32.ActiveCfg = Release|Win32
+ 		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Release|Win32.Build.0 = Release|Win32
+ 		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Release|x64.ActiveCfg = Release|x64
+ 		{39AD6ECC-8BAD-4368-95E4-A1AA2F077BB7}.Release|x64.Build.0 = Release|x64
++		{D745AE2F-596A-403A-9B91-81A8C6779243}.Debug_IPP|Win32.ActiveCfg = Debug_IPP|Win32
++		{D745AE2F-596A-403A-9B91-81A8C6779243}.Debug_IPP|Win32.Build.0 = Debug_IPP|Win32
++		{D745AE2F-596A-403A-9B91-81A8C6779243}.Debug_IPP|x64.ActiveCfg = Debug_IPP|x64
++		{D745AE2F-596A-403A-9B91-81A8C6779243}.Debug_IPP|x64.Build.0 = Debug_IPP|x64
+ 		{D745AE2F-596A-403A-9B91-81A8C6779243}.Debug|Win32.ActiveCfg = Debug|Win32
+ 		{D745AE2F-596A-403A-9B91-81A8C6779243}.Debug|Win32.Build.0 = Debug|Win32
+ 		{D745AE2F-596A-403A-9B91-81A8C6779243}.Debug|x64.ActiveCfg = Debug|x64
+ 		{D745AE2F-596A-403A-9B91-81A8C6779243}.Debug|x64.Build.0 = Debug|x64
++		{D745AE2F-596A-403A-9B91-81A8C6779243}.Release_IPP|Win32.ActiveCfg = Release_IPP|Win32
++		{D745AE2F-596A-403A-9B91-81A8C6779243}.Release_IPP|Win32.Build.0 = Release_IPP|Win32
++		{D745AE2F-596A-403A-9B91-81A8C6779243}.Release_IPP|x64.ActiveCfg = Release_IPP|x64
++		{D745AE2F-596A-403A-9B91-81A8C6779243}.Release_IPP|x64.Build.0 = Release_IPP|x64
+ 		{D745AE2F-596A-403A-9B91-81A8C6779243}.Release|Win32.ActiveCfg = Release|Win32
+ 		{D745AE2F-596A-403A-9B91-81A8C6779243}.Release|Win32.Build.0 = Release|Win32
+ 		{D745AE2F-596A-403A-9B91-81A8C6779243}.Release|x64.ActiveCfg = Release|x64
+ 		{D745AE2F-596A-403A-9B91-81A8C6779243}.Release|x64.Build.0 = Release|x64
++		{13992FD2-077E-4954-B065-A428198201A9}.Debug_IPP|Win32.ActiveCfg = Debug_IPP|Win32
++		{13992FD2-077E-4954-B065-A428198201A9}.Debug_IPP|Win32.Build.0 = Debug_IPP|Win32
++		{13992FD2-077E-4954-B065-A428198201A9}.Debug_IPP|x64.ActiveCfg = Debug_IPP|x64
++		{13992FD2-077E-4954-B065-A428198201A9}.Debug_IPP|x64.Build.0 = Debug_IPP|x64
+ 		{13992FD2-077E-4954-B065-A428198201A9}.Debug|Win32.ActiveCfg = Debug|Win32
+ 		{13992FD2-077E-4954-B065-A428198201A9}.Debug|Win32.Build.0 = Debug|Win32
+ 		{13992FD2-077E-4954-B065-A428198201A9}.Debug|x64.ActiveCfg = Debug|x64
+ 		{13992FD2-077E-4954-B065-A428198201A9}.Debug|x64.Build.0 = Debug|x64
++		{13992FD2-077E-4954-B065-A428198201A9}.Release_IPP|Win32.ActiveCfg = Release_IPP|Win32
++		{13992FD2-077E-4954-B065-A428198201A9}.Release_IPP|Win32.Build.0 = Release_IPP|Win32
++		{13992FD2-077E-4954-B065-A428198201A9}.Release_IPP|x64.ActiveCfg = Release_IPP|x64
++		{13992FD2-077E-4954-B065-A428198201A9}.Release_IPP|x64.Build.0 = Release_IPP|x64
+ 		{13992FD2-077E-4954-B065-A428198201A9}.Release|Win32.ActiveCfg = Release|Win32
+ 		{13992FD2-077E-4954-B065-A428198201A9}.Release|Win32.Build.0 = Release|Win32
+ 		{13992FD2-077E-4954-B065-A428198201A9}.Release|x64.ActiveCfg = Release|x64

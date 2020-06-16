@@ -1,0 +1,64 @@
+{
+    "server_ip" : "10.0.6.249",
+    "kafka_port" : 9092,
+    "http_port" : 8888,
+
+    "rootFullName" : "/root/backuproot",
+
+    "cert_dir" : "/root/storage/combine/workspace/stClient/cert",
+    "log_dir" : "/root/storage/combine/workspace/stClient/log",
+    "client_bin_dir" : "/root/storage/combine/workspace/stClient/dist",
+    "lib_dir" : "/root/storage/combine/workspace/stClient/lib",
+    "server_bin_dir" : "/root/stServer",
+
+    "ipc_queue_max_msg_size" : 1000,
+    "ipc_command_queue_id" : 1234,
+    "ipc_result_queue_id" : 5678,
+
+    "DB_host" : "localhost",
+    "DB_user" : "root",
+    "DB_pw" : "ketilinux",
+    "DB_dbName" : "storage",
+
+    "COMMAND_SEND" : "send",
+    "COMMAND_FIND" : "find",
+    "COMMAND_PRINT_ALL" : "printAll",
+    "COMMAND_SAVE_DB" : "saveDB",
+    "COMMAND_INIT_DB" : "initDB",
+    "COMMAND_LOAD_DB" : "loadDB",
+
+    "COMMAND_START_PRECHECKER" : "startPC",
+    "COMMAND_END_PRECHECKER" : "endPC",
+    "COMMAND_START_TREESERVER" : "startTS",
+    "COMMAND_END_TREESERVER" : "endTS",
+    "COMMAND_START_CONSUMER" : "startCS",
+    "COMMAND_END_CONSUMER" : "endCS",
+
+    "COMMAND_LZ4_COMP" : "comp",
+    "COMMAND_LZ4_DECOMP" : "decomp",
+    "COMMAND_AES_ENC" : "enc",
+    "COMMAND_AES_DEC" : "dec",
+
+    "POLICY_DEFAULT_AES" : "True",
+    "POLICY_DEFAULT_LZ4" : "True",
+
+    "POLICY_COMPRESS_RATIO" : 1.1,
+
+    "POLICY_NUMBER_OF_SEND_PROCESS" : 25,
+    "POLICY_NUMBER_OF_LZ4_PROCESS" : 3,
+    "POLICY_NUMBER_OF_AES_PROCESS" : 3,
+
+    "POLICY_NUMBER_OF_PRECHECK_PROCESS" : 50,
+
+    "POLICY_PRECHECKER_SEC_TIME_SLEEP" : 5,
+
+    "POLICY_SIMILARITY" : 0.8,
+
+    "POLICY_MAX_BLOCK_NUM" : 10,
+
+    "POLICY_MAX_QUEUE_SIZE" : 50,
+
+
+    "POLICY_PARTITION_SIZE" : 640000,
+    "POLICY_CHUNK_SIZE" : 16000
+}

@@ -1,0 +1,140 @@
+from pylab import figure, axes, pie, title, savefig
+import matplotlib.pyplot as plt
+import time
+import multiprocessing
+import random
+import happybase
+from datetime import datetime
+
+
+name_list = [
+        "Accelerator_pedal_position_D", # 0
+        "Ambient_air_temperature", # 1
+        "Catalyst_Temperature_Bank1_Sensor1", # 2
+        "Control_module_voltage", # 3
+        "Engine_RPM", # 4
+        "Engine_coolant_temperature", # 5
+        "Engine_load", # 6
+        "Evap_System_Vapor_Pressure", # 7
+        "Fuel_level", # 8
+        "Intake_air_temperature", # 9
+        "Long_term_fuel_trim_Bank1", # 10
+        "Short_term_fuel_trim_Bank1", # 11
+        "Throttle_position", # 12
+        "Timing_advance", # 13
+        "Vehicle_speed" # 14
+]
+
+#lock = multiprocessing.Lock()
+#queue = multiprocessing.Queue()
+
+value_list = [[] for i in range(len(name_list))]
+queue_list = [multiprocessing.Queue() for i in range(len(name_list))]
+lock = multiprocessing.Lock()
+
+connection = happybase.Connection('localhost',autoconnect=False)
+connection.open()
+
+table = connection.table('Sensor')
+
+
+
+def draw_graph(index, x,y):
+    plt.cla()
+    plt.plot(x, y, marker='o')
+    plt.xlabel('Number')
+    plt.ylabel('Value')
+    plt.title(name_list[index])
+
+    fig = plt.gcf() 
+#    plt.show()
+
+    from errno import EEXIST
+    from os import makedirs,path
+
+    try:
+        mypath = "./images/"+name_list[index]
+        makedirs(mypath)
+    except OSError as exc: # Python >2.5
+        if exc.errno == EEXIST and path.isdir(mypath):
+            pass
+        else: raise
+
+    fig.savefig(mypath+"/"+str(time.time()) + "_" + name_list[i] + ".pdf") 
+
+def generate(queue_list, lock):
+
+    while(True):
+        time.sleep(10)
+
+        lock.acquire()
+
+        for i in range(0, len(name_list)):
+            value = queue_list[i].get()
+            xList = list(range(0, len(value)))
+            yList = value
+
+
+            draw_graph(i, xList, yList)
+            value = []
+            queue_list[i].put(value)
+
+
+        lock.release()
+
+
+        
+
+
+def queueClear(queue):
+    while not queue.empty():
+        queue.get()  # as docs say: Remove and return an item from the queue.
+
+
+def main():
+
+    isData = False
+
+    for key, data in table.scan(limit=1, reverse=True):
+        print("First Key : "+key)
+        prev_time = key+"1"
+        break
+
+
+    p1 = multiprocessing.Process(target=generate,args=(queue_list,lock))
+    p1.daemon = True
+    p1.start()
+
+    while(True):
+        lock.acquire()
+        for i in range(0, len(name_list)):
+            if not queue_list[i].empty():
+                value_list[i] = queue_list[i].get()
+
+        for key, data in table.scan(row_start=prev_time):
+            for i in range(0, len(name_list)):
+                    value_list[i].append(float(data['Value:'+name_list[i]]))
+
+            isData = True
+
+        if isData:
+            prev_time = key+"1"
+            isData = False
+            print("Update Key : " + key)
+        
+        for i in range(0, len(name_list)):
+                queueClear(queue_list[i])
+                queue_list[i].put(value_list[i])
+
+        lock.release()
+
+        time.sleep(0.1)
+
+if __name__ == '__main__':
+    multiprocessing.freeze_support()
+    main()
+
+
+
+
+

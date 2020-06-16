@@ -1,0 +1,78 @@
+import sys
+import time
+import BaseHTTPServer
+from random import *
+from time import localtime, strftime
+from datetime import datetime
+
+
+#HOST_NAME = '10.0.6.204' # !!!REMEMBER TO CHANGE THIS!!!
+HTTP_PORT = 8888 # Maybe set this to 9000.
+
+HOST_NAME = sys.argv[1]
+
+class MyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+
+
+    def do_HEAD(s):
+        s.send_response(200)
+        s.send_header("Content-type", "text/html")
+        s.end_headers()
+
+    def do_GET(s):
+        currentTime = str(datetime.now())
+        c_time = currentTime.split()[1]
+        sec = c_time.split(":")[2]
+
+        sensorID = "SENSOR03"
+
+        if float(sec) >= 0 and float(sec) <= 15:
+            temp = str(uniform(40.0, 60.0))
+        elif float(sec) > 15 and float(sec) <=30:
+            temp = str(uniform(80.0, 100.0)) 
+        elif float(sec) > 30 and float(sec) <= 45:
+            temp = str(uniform(40.0, 60.0))
+        else:
+            temp = str(uniform(0.0, 20.0))
+
+        power = str(uniform(100.0,500.0))
+        humidity = str(uniform(20.0,60.0))
+        ctime = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            
+        
+        """Respond to a GET request."""
+        s.send_response(200)
+        s.send_header("Content-type", "text/html")
+        s.end_headers()
+        s.wfile.write("<html><head><title>Title goes here.</title></head>\n")
+        s.wfile.write("<body><p>This is a test.</p>\n")
+        s.wfile.write("<body><sensorid>"+ sensorID +"</sensorid>\n")
+        s.wfile.write("<body><temp>"+ temp +"</temp>\n")
+        s.wfile.write("<body><power>"+ power +"</power>\n")
+        s.wfile.write("<body><humidity>"+ humidity +"</humidity>\n")
+        s.wfile.write("<body><ctime>"+ ctime +"</ctime>\n")
+        # If someone went to "http://something.somewhere.net/foo/bar/",
+        # then s.path equals "/foo/bar/".
+        s.wfile.write("<p>You accessed path: %s</p>\n" % s.path)
+        s.wfile.write("</body></html>\n")
+
+
+
+        # print("client_address : " + str(s.client_address))
+        # print("server : " + str(s.server))
+        # print("command : " + str(s.client_address))
+        # print("path : " + str(s.path))
+        # print("request_version : " + str(s.request_version))
+        # print("headers : " + str(s.headers))
+
+
+if __name__ == '__main__':
+    server_class = BaseHTTPServer.HTTPServer
+    httpd = server_class((HOST_NAME, HTTP_PORT), MyHandler)
+    print time.asctime(), "Server Starts - %s:%s" % (HOST_NAME, HTTP_PORT)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    httpd.server_close()
+    print time.asctime(), "Server Stops - %s:%s" % (HOST_NAME, HTTP_PORT)

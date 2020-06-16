@@ -1,0 +1,88 @@
+package com.colobu.kafka
+
+import java.util.concurrent._
+import java.util.{Collections, Properties}
+
+import kafka.consumer.KafkaStream
+import kafka.utils.Logging
+import org.apache.kafka.clients.consumer.{ConsumerConfig, KafkaConsumer}
+
+import scala.collection.JavaConversions._
+
+class ScalaConsumerExample(val brokers: String,
+                           val groupId: String,
+                           val topic: String) extends Logging {
+    val kafkaParams = Map[String, Object](
+			          "bootstrap.servers" -> "localhost:9092",
+					            "key.deserializer" -> classOf[StringDeserializer],
+								          "value.deserializer" -> classOf[StringDeserializer],
+										            "group.id" -> "use_a_separate_group_id_for_each_stream",
+													          "auto.offset.reset" -> "latest", // 실행된 후부터 읽어옴 얼리스트로 해야 이미있는것도 다읽어옴
+															            "enable.auto.commit" -> (false: java.lang.Boolean)
+																		    )
+		    val topics = Array("http","mqtt","coap")
+			    val stream = KafkaUtils.createDirectStream[String, String](
+						          ssc,
+								            LocationStrategies.PreferConsistent,
+											          ConsumerStrategies.Subscribe[String, String](topics, kafkaParams)
+													      )
+				    val topics2 = Array("hbase")
+					    val stream2 = KafkaUtils.createDirectStream[String, String](
+								          ssc,
+										            LocationStrategies.PreferConsistent,
+													          ConsumerStrategies.Subscribe[String, String](topics2, kafkaParams)
+															      )
+  val props = createConsumerConfig(brokers, groupId)
+  val consumer = new KafkaConsumer[String, String](props)
+  var executor: ExecutorService = null
+
+  def shutdown() = {
+    if (consumer != null)
+      consumer.close();
+    if (executor != null)
+      executor.shutdown();
+  }
+//  def delete() = {
+//    sensr
+//  }
+
+  def createConsumerConfig(brokers: String, groupId: String): Properties = {
+    val props = new Properties()
+    props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers)
+    props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer")
+    props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringDeserializer")
+    props
+  }
+  //   //hadoop filesystem 설정
+    //   val conf2 = new Configuration()
+    //   conf2.set("fs.defaultFS", "hdfs://" + NameNode + ":9000")
+    //   val hdfs = FileSystem.get(conf2) 
+    //   val path = new Path("/rule/sensor.drl")
+    //   val stream2 = hdfs.open(path)
+    //   def readLines = Stream.cons(stream2.readLine, Stream.continually( stream2.readLine))
+
+        //    val json_sensor = parseJSON(x)
+        //    val sensor = new Sensor()
+        //    sensor.set_Time(json_sensor.Time)
+        //    sensor.set_boom_angle(json_sensor.boom_angle)
+  def run() = {
+    consumer.subscribe(Collections.singletonList(this.topic))
+
+    Executors.newSingleThreadExecutor.execute(    new Runnable {
+      override def run(): Unit = {
+        while (true) {
+          val records = consumer.poll(1000)
+
+          for (record <- records) {
+            System.out.println("Received message: (" + record.key() + ", " + record.value() + ") at offset " + record.offset())
+          }
+        }
+      }
+    })
+  }
+}
+
+object ScalaConsumerExample extends App {
+  val example = new ScalaConsumerExample(args(0), args(1), args(2))
+  example.run()
+}

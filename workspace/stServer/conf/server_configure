@@ -1,0 +1,15 @@
+{
+    "server_ip" : "10.0.6.232",
+    "http_port" : 8888,
+    "kafka_port" : 9092,
+
+    "cert_dir" : "/root/storage/combine/workspace/stServer/cert",
+    "log_dir" : "/root/storage/combine/workspace/stServer/log",
+
+    "ipc_queue_max_msg_size" : 1000,
+    "ipc_key_queue_id" : 1234,
+
+    "POLICY_NUMBER_OF_AES_PROCESS" : 10,
+    "POLICY_NUMBER_OF_LZ4_PROCESS" : 2,
+    "POLICY_NUMBER_OF_WRITER_PROCESS" : 1
+}

@@ -1,0 +1,140 @@
+from pylab import figure, axes, pie, title, savefig
+import matplotlib.pyplot as plt
+import time
+import threading
+import random
+import happybase
+import datetime
+import sys
+
+TIME_PERIOD = int(sys.argv[1])
+DELAY = int(sys.argv[2])
+
+
+name_list = [
+        "Accelerator_pedal_position_D", # 0
+        "Ambient_air_temperature", # 1
+        "Catalyst_Temperature_Bank1_Sensor1", # 2
+        "Control_module_voltage", # 3
+        "Engine_RPM", # 4
+        "Engine_coolant_temperature", # 5
+        "Engine_load", # 6
+        "Evap_System_Vapor_Pressure", # 7
+        "Fuel_level", # 8
+        "Intake_air_temperature", # 9
+        "Long_term_fuel_trim_Bank1", # 10
+        "Short_term_fuel_trim_Bank1", # 11
+        "Throttle_position", # 12
+        "Timing_advance", # 13
+        "Vehicle_speed" # 14
+]
+
+
+value_list = [[] for i in range(len(name_list))]
+
+connection = happybase.Connection('localhost',autoconnect=False)
+connection.open()
+
+table = connection.table('Sensor')
+
+
+
+def draw_graph(index, x,y):
+    plt.cla()
+    plt.plot(x, y, marker='o')
+    plt.xlabel('Number')
+    plt.ylabel('Value')
+    plt.title(name_list[index])
+
+    fig = plt.gcf() 
+#    plt.show()
+
+    from errno import EEXIST
+    from os import makedirs,path
+
+    try:
+        mypath = "./images/"+name_list[index]
+        makedirs(mypath)
+    except OSError as exc: # Python >2.5
+        if exc.errno == EEXIST and path.isdir(mypath):
+            pass
+        else: raise
+
+    fig.savefig(mypath+"/"+str(time.time()) + "_" + name_list[i] + ".pdf") 
+
+def draw_graph2(index, x,y):
+	    plt.cla()
+		    plt.plot(x, y, marker='o')
+		       plt.xlabel('Number')
+		       plt.ylabel('Value')
+		       plt.title(name_list[index])
+
+		       fig = plt.gcf()
+#    plt.show()
+
+	    from errno import EEXIST
+		    from os import makedirs,path
+
+			    try:
+				        mypath = "./images2/"+name_list[index]
+						        makedirs(mypath)
+	    except OSError as exc: # Python >2.5
+		        if exc.errno == EEXIST and path.isdir(mypath):
+					            pass
+								        else: raise
+
+										     fig.savefig(mypath+"/"+str(time.time()) + "_" + name_list[i] + ".jpg")
+
+def generate():
+
+    for i in range(0, len(name_list)):
+        
+        xList = list(range(0, len(value_list[i])))
+        yList = value_list[i]
+
+
+        draw_graph(i, xList, yList)
+        value_list[i] = []
+       
+
+def scan():
+    timer = threading.Timer(TIME_PERIOD, scan)
+    timer.daemon=True
+    timer.start()
+
+    dtime = datetime.datetime.now()
+
+    start_dtime = dtime - datetime.timedelta(seconds=TIME_PERIOD) - datetime.timedelta(seconds=DELAY)
+    start_time = start_dtime.strftime("%Y-%m-%d %H:%M:%S.%f")
+
+    stop_dtime = dtime - datetime.timedelta(seconds=DELAY)
+    stop_time = stop_dtime.strftime("%Y-%m-%d %H:%M:%S.%f")
+    
+    print("Cur Time : " + dtime.strftime("%Y-%m-%d %H:%M:%S.%f"))
+    print("Scan Start Time : " + start_time)
+    print("Scan End Time : " + stop_time)
+
+    for key, data in table.scan(row_start=start_time, row_stop=stop_time):
+        for i in range(0, len(name_list)):
+                value_list[i].append(float(data['Value:'+name_list[i]]))
+        
+    generate()
+    
+
+
+def main():
+    scan()
+
+   
+
+
+if __name__ == '__main__':
+    main()
+
+    while(True):
+        time.sleep(3600)
+
+
+
+
+

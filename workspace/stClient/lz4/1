@@ -1,0 +1,63 @@
+import ctypes
+import time
+import os
+#import sys
+from ctypes import *
+
+#sys.path.append('/opt/intel/compilers_and_libraries_2018.3.222/linux/ipp/lib/intel64')
+os.environ['LD_LIBRARY_PATH'] = "/opt/intel/compilers_and_libraries_2018.3.222/linux/ipp/lib/intel64"
+os.putenv('LD_LIBRARY_PATH', "/opt/intel/compilers_and_libraries_2018.3.222/linux/ipp/lib/intel64")
+cdll.LoadLibrary('libippcce9.so')
+
+compress_module = ctypes.CDLL('./lib/liblz4.so.1.7.5')
+
+
+
+f = open('DigitalTwin.tar' , 'r')
+
+
+data = f.read()
+#print("org : " + data)
+src_size = len(data)
+
+max_dst_size = compress_module.LZ4_compressBound(src_size)
+
+print("max_dst_size : " + str(max_dst_size))
+
+compressed_data = ctypes.create_string_buffer(max_dst_size)
+
+start_time = time.time()
+	
+compressed_size = compress_module.LZ4_compress_default(data, compressed_data, src_size, max_dst_size)
+
+print("--- %s seconds ---" %(time.time() - start_time))
+print("src_size : " + str(src_size))
+print("compressed_size : " + str(compressed_size))
+result = ""
+
+result = compressed_data.raw
+print(len(result))
+
+#for s in compressed_data :
+#  result += s
+
+#print(len(result))
+#print(result[:compressed_size])
+print("compress end")
+#result = result[:compressed_size]
+#print(len(result))
+decompressed_data = ctypes.create_string_buffer(src_size)
+
+decompressed_size = compress_module.LZ4_decompress_safe(result, decompressed_data, compressed_size, src_size)
+
+print("decompressed_size : " + str(decompressed_size))
+#result = ""
+#for s in decompressed_data:
+#    result += s
+
+#print(result)
+print("end")
+#print(len(decompressed_data))
+
+if data == result :
+   print("oh")
